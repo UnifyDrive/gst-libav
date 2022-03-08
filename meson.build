@@ -24,8 +24,9 @@ libavcodec_dep = dependency('libavcodec', version: '>= 58.18.100',
   fallback: ['FFmpeg', 'libavcodec_dep'])
 libavutil_dep = dependency('libavutil', version: '>= 56.14.100',
   fallback: ['FFmpeg', 'libavutil_dep'])
+libass_dep = dependency('libass', version: '>= 0.14.0')
 
-libav_deps = [libavfilter_dep, libavformat_dep, libavcodec_dep, libavutil_dep]
+libav_deps = [libavfilter_dep, libavformat_dep, libavcodec_dep, libavutil_dep, libass_dep]
 
 cc = meson.get_compiler('c')
 

@@ -3,14 +3,13 @@ sources = [
     'gstavprotocol.c',
     'gstavcodecmap.c',
     'gstavutils.c',
-    'gstavaudenc.c',
-    'gstavvidenc.c',
     'gstavauddec.c',
     'gstavviddec.c',
     'gstavcfg.c',
     'gstavdemux.c',
     'gstavmux.c',
     'gstavdeinterlace.c',
+    'gstavsubdec.c',
 ]
 
 gstlibav_plugin = library('gstlibav',
