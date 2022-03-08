@@ -738,7 +738,7 @@ gst_ffmpegsubdec_chain (GstPad * pad, GstObject * parent, GstBuffer * inbuf)
       gst_ffmpegsubdec_text_direct(ffmpegdec, (gchar*)bdata, bsize,GST_BUFFER_TIMESTAMP (inbuf),GST_BUFFER_DURATION (inbuf));
       goto beach;
   }*/
-  GST_WARNING_OBJECT (ffmpegdec, "Have buffer[%s] ", (gchar*)bdata);
+  //GST_WARNING_OBJECT (ffmpegdec, "Have buffer[%s] ", (gchar*)bdata);
 
   do {
     AVPacket packet = {0};
