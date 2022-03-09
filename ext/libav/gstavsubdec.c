@@ -242,8 +242,17 @@ static gboolean
 gst_ffmpegsubdec_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
 {
   gboolean res = FALSE;
+  GstFFMpegSubDec *ffmpegdec = GST_FFMPEG_SUB_DEC (parent);
 
   switch (GST_EVENT_TYPE (event)) {
+    case GST_EVENT_FLUSH_STOP:
+    {
+      if (ffmpegdec && ffmpegdec->track)
+        ass_flush_events(ffmpegdec->track);
+
+      res = gst_pad_event_default (pad, parent, event);
+      break;
+    }
     default:{
       res = gst_pad_event_default (pad, parent, event);
       break;
