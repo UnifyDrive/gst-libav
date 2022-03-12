@@ -37,6 +37,7 @@ struct _GstFFMpegSubDec
 
   GstPad *sinkpad;
   GstPad *srcpad;
+  GMutex flow_lock;
 
   /* decoding */
   AVCodecContext *context;

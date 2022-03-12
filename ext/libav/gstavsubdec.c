@@ -39,7 +39,7 @@
 G_DEFINE_TYPE (GstFFMpegSubDec, gst_ffmpeg_sub_dec, GST_TYPE_ELEMENT);
 
 #define MAX_SUBTITLE_LENGTH 1024
-#define ZS_SUBTITLE_4K_DEN (6)
+#define ZS_SUBTITLE_4K_DEN (4)
 
 
 /* libass stores an RGBA color in the format RRGGBBTT, where TT is the transparency level */
@@ -57,6 +57,7 @@ enum
   PROP_SUR_HEIGHT
 };
 
+static int gst_ffmpeg_sub_dec_init_ass(GstFFMpegSubDec * ffmpegdec);
 
 static void gst_ffmpeg_sub_dec_base_init(GstFFMpegSubDecClass * klass)
 {
@@ -172,6 +173,7 @@ gst_ffmpeg_sub_dec_set_property (GObject * object, guint prop_id,
     const GValue * value, GParamSpec * pspec)
 {
   GstFFMpegSubDec *ffmpegdec = NULL;
+  AVDictionary *codec_opts = NULL;
 
   g_return_if_fail (GST_IS_FFMPEG_SUB_DEC (object));
   ffmpegdec = GST_FFMPEG_SUB_DEC (object);
@@ -188,10 +190,50 @@ gst_ffmpeg_sub_dec_set_property (GObject * object, guint prop_id,
       break;
   }
 
-  if (ffmpegdec->need_ass && ffmpegdec->surface_w > 0 && ffmpegdec->surface_h > 0) {
-    GST_DEBUG_OBJECT(ffmpegdec, "ass_set_frame_size (%d, %d)!\n", ffmpegdec->surface_w, ffmpegdec->surface_h);
-    ass_set_frame_size(ffmpegdec->renderer, ffmpegdec->surface_w, ffmpegdec->surface_h);
+  if (ffmpegdec->surface_w > 0 && ffmpegdec->surface_h > 0) {
+    ffmpegdec->context->width = ffmpegdec->surface_w;
+    ffmpegdec->context->height = ffmpegdec->surface_h;
+    if (ffmpegdec->opened == FALSE) {
+        switch (ffmpegdec->codec->id) {
+            case AV_CODEC_ID_TEXT:
+            case AV_CODEC_ID_ASS:
+            case AV_CODEC_ID_SSA:
+            case AV_CODEC_ID_SRT:
+            case AV_CODEC_ID_SUBRIP:
+                ffmpegdec->need_ass = TRUE;
+                if (gst_ffmpeg_sub_dec_init_ass(ffmpegdec) < 0) {
+                    goto failed_open;
+                }
+                ffmpegdec->context->pkt_timebase.num = 1;
+                ffmpegdec->context->pkt_timebase.den = 1000;
+                av_dict_set(&codec_opts, "sub_text_format", "ass", 0);
+                av_dict_set(&codec_opts, "sub_charenc", "UTF-8", 0);
+                if (gst_ffmpeg_avcodec_open_sub (ffmpegdec->context, ffmpegdec->codec, &codec_opts) < 0)
+                  goto failed_open;
+                /* Decode subtitles and push them into the renderer (libass) */
+                if (ffmpegdec->context->subtitle_header)
+                        ass_process_codec_private(ffmpegdec->track,
+                                      ffmpegdec->context->subtitle_header,
+                                      ffmpegdec->context->subtitle_header_size);
+                av_dict_free(&codec_opts);
+                break;
+            default:
+                if (gst_ffmpeg_avcodec_open (ffmpegdec->context, ffmpegdec->codec) < 0)
+                  goto failed_open;
+                break;
+        }
+    }
+
+    if (ffmpegdec->need_ass) {
+        GST_DEBUG_OBJECT(ffmpegdec, "ass_set_frame_size (%d, %d)!\n", ffmpegdec->surface_w, ffmpegdec->surface_h);
+        ass_set_frame_size(ffmpegdec->renderer, ffmpegdec->surface_w, ffmpegdec->surface_h);
+    }
+    ffmpegdec->opened = TRUE;
   }
+
+failed_open:
+
+    return;
 }
 
 static void
@@ -247,8 +289,12 @@ gst_ffmpegsubdec_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
   switch (GST_EVENT_TYPE (event)) {
     case GST_EVENT_FLUSH_STOP:
     {
-      if (ffmpegdec && ffmpegdec->track)
+      if (ffmpegdec && ffmpegdec->track) {
+        g_mutex_lock (&ffmpegdec->flow_lock);
         ass_flush_events(ffmpegdec->track);
+        g_mutex_unlock (&ffmpegdec->flow_lock);
+        GST_WARNING_OBJECT (pad, "Forwarding event %" GST_PTR_FORMAT, event);
+      }
 
       res = gst_pad_event_default (pad, parent, event);
       break;
@@ -286,27 +332,25 @@ gst_avpacket_init (AVPacket * packet, guint8 * data, guint size)
 
 static void gst_ffmpegsubdec_picture(GstFFMpegSubDec *ffmpegdec, AVSubtitle* sub, GstClockTime ts, GstClockTime dur)
 {
-  gint i, j, w, h, size;
+  gint i, j, w, h, size, x, y;
   guint8 **data;
   guint8 *ptr;
   GstBuffer *buffer;
+  GstVideoCropMeta *vcmeta;
 
   if (sub && sub->num_rects) {
-    //GST_DEBUG_OBJECT(ffmpegdec, " sub->num_rects=(%d)", sub->num_rects);
+    //GST_WARNING_OBJECT(ffmpegdec, " sub->num_rects=(%d), width=%d, height=%d", sub->num_rects, ffmpegdec->context->width, ffmpegdec->context->height);
     for (i = 0; i < sub->num_rects; i++) {
       w = sub->rects[i]->w;
       h = sub->rects[i]->h;
+      x = sub->rects[i]->x;// * ffmpegdec->surface_w / ffmpegdec->context->width;
+      y = sub->rects[i]->y;// * ffmpegdec->surface_h / ffmpegdec->context->height;
+      //GST_WARNING_OBJECT(ffmpegdec, "Picture parametes (%d:%d) [%d,%d]", x, y, w, h);
+
       if ( (ffmpegdec->surface_w >= 3840 /*&& ffmpegdec->surface_h >= 2160*/) && (h >= ffmpegdec->surface_h / ZS_SUBTITLE_4K_DEN) ) {
           GST_WARNING_OBJECT(ffmpegdec, " 4k video(%d), picture subtitle only show %d height", h, (ffmpegdec->surface_h / ZS_SUBTITLE_4K_DEN));
-          continue;
+          //continue;
       }
-
-      /*if (sub->rects[i]->y > (ffmpegdec->surface_h - h)) {
-          
-      }else {
-          GST_WARNING_OBJECT(ffmpegdec, " 4k video, sub->rects[i]->y=%d, drop it!!!", sub->rects[i]->y);
-          continue;
-      }*/
 
       size = w*h*4;
       data = sub->rects[i]->pict.data;
@@ -330,6 +374,12 @@ static void gst_ffmpegsubdec_picture(GstFFMpegSubDec *ffmpegdec, AVSubtitle* sub
       GST_BUFFER_PTS(buffer) = ts;
       GST_BUFFER_DURATION(buffer) = dur;
 
+      vcmeta = gst_buffer_add_video_crop_meta (buffer);
+      vcmeta->x = x;
+      vcmeta->y = y;
+      vcmeta->width = ffmpegdec->context->width;
+      vcmeta->height = ffmpegdec->context->height;
+
       /*GST_WARNING_OBJECT(ffmpegdec, "Have picture w:%d, h:%d, ts %"
         GST_TIME_FORMAT ", dur %" G_GINT64_FORMAT, w, h, GST_TIME_ARGS (ts), GST_BUFFER_DURATION (buffer));*/
 
@@ -344,7 +394,7 @@ static void gst_ffmpegsubdec_picture(GstFFMpegSubDec *ffmpegdec, AVSubtitle* sub
      GST_BUFFER_DURATION(buffer) = dur;
      gst_pad_push(ffmpegdec->srcpad, buffer);
 
-     /*GST_DEBUG_OBJECT(ffmpegdec, "Have empty picture ts %"
+     /*GST_WARNING_OBJECT(ffmpegdec, "Have empty picture ts %"
         GST_TIME_FORMAT ", dur %" G_GINT64_FORMAT, GST_TIME_ARGS (ts), GST_BUFFER_DURATION (buffer));*/
   }
 }
@@ -429,7 +479,9 @@ static void gst_ffmpegsubdec_ass2picture(GstFFMpegSubDec *ffmpegdec, AVSubtitle*
     int64_t duration = (int64_t)dur;
     int detect_change = 0;
     int stride = 0;
+    GstVideoCropMeta *vcmeta;
 
+    //GST_WARNING_OBJECT(ffmpegdec, " sub->num_rects=(%d), width=%d, height=%d", sub->num_rects, ffmpegdec->context->width, ffmpegdec->context->height);
     if (sub && sub->num_rects) {
         for (i = 0; i < sub->num_rects; i++) {
             char *ass_line = sub->rects[i]->ass;
@@ -449,6 +501,12 @@ static void gst_ffmpegsubdec_ass2picture(GstFFMpegSubDec *ffmpegdec, AVSubtitle*
                 //GST_DEBUG_OBJECT(ffmpegdec, " 4k video(%d), text subtitle only show %d height", w, h);
             }
 
+            ASS_Image *image_tmp = image;
+            gint dst_y_least = image_tmp?image_tmp->dst_y:0;
+            for (; image_tmp; image_tmp = image_tmp->next) {
+                if (dst_y_least > image_tmp->dst_y)
+                    dst_y_least = image_tmp->dst_y;
+            }
             size = w * h * 4;
             ptr = g_malloc0(size);
             stride = w * 4;
@@ -464,15 +522,20 @@ static void gst_ffmpegsubdec_ass2picture(GstFFMpegSubDec *ffmpegdec, AVSubtitle*
                 if (image->h > h) {
                     GST_WARNING_OBJECT(ffmpegdec, " 4k video, image->h=%d, h=%d,drop it!!!", image->h, h);
                     continue;
-                }else if ( h <= ffmpegdec->surface_h/ZS_SUBTITLE_4K_DEN ) {
+                }else if ( h <= ffmpegdec->surface_h/ZS_SUBTITLE_4K_DEN ) {//4K
+                    #if 0
                     if (image->dst_y > (ffmpegdec->surface_h - h)) {
-                        //dst_y_new = image->dst_y - h;
                         dst_y_new = image->dst_y - (ffmpegdec->surface_h - h);
                     }else {
                         GST_WARNING_OBJECT(ffmpegdec, " 4k video, image->dst_y=%d, drop it!!!", image->dst_y);
                         continue;
                     }
-                    
+                    #endif
+                    dst_y_new = image->dst_y - dst_y_least;
+                    if (dst_y_new + image->h > h) {
+                        GST_WARNING_OBJECT(ffmpegdec, " 4k video, image->h=%d, h=%d, dst_y_new=%d,drop it!!!", image->h, h, dst_y_new);
+                        continue;
+                    }
                 }else {
                     dst_y_new = image->dst_y;
                 }
@@ -511,9 +574,16 @@ static void gst_ffmpegsubdec_ass2picture(GstFFMpegSubDec *ffmpegdec, AVSubtitle*
             buffer = gst_buffer_new_allocate (NULL, size, NULL);
             gst_buffer_fill(buffer, 0, ptr, size);
             gst_buffer_add_video_meta (buffer, GST_VIDEO_FRAME_FLAG_NONE, GST_VIDEO_FORMAT_RGBA, w, h);
-
             GST_BUFFER_PTS(buffer) = ts;
             GST_BUFFER_DURATION(buffer) = dur;
+            if (h <= ffmpegdec->surface_h/ZS_SUBTITLE_4K_DEN) {//4K
+                vcmeta = gst_buffer_add_video_crop_meta (buffer);
+
+                vcmeta->x = 0;
+                vcmeta->y = dst_y_least;
+                vcmeta->width = 0;
+                vcmeta->height = ffmpegdec->context->height;
+            }
 
             /*GST_DEBUG_OBJECT(ffmpegdec, " Have pic w:%d, h:%d, ts %"
                 GST_TIME_FORMAT ", dur %" G_GINT64_FORMAT, w, h, GST_TIME_ARGS (ts), GST_BUFFER_DURATION (buffer));*/
@@ -734,10 +804,11 @@ gst_ffmpegsubdec_chain (GstPad * pad, GstObject * parent, GstBuffer * inbuf)
 
   ffmpegdec = GST_FFMPEG_SUB_DEC (parent);
 
-  GST_WARNING_OBJECT (ffmpegdec, "Have buffer of size %" G_GSIZE_FORMAT ", ts %"
+  /*GST_WARNING_OBJECT (ffmpegdec, "Have buffer of size %" G_GSIZE_FORMAT ", ts %"
       GST_TIME_FORMAT ", dur %" G_GINT64_FORMAT, gst_buffer_get_size (inbuf),
-      GST_TIME_ARGS (GST_BUFFER_TIMESTAMP (inbuf)), GST_BUFFER_DURATION (inbuf));
+      GST_TIME_ARGS (GST_BUFFER_TIMESTAMP (inbuf)), GST_BUFFER_DURATION (inbuf));*/
 
+  g_mutex_lock (&ffmpegdec->flow_lock);
   gst_buffer_map (inbuf, &map, GST_MAP_READ);
 
   bdata = map.data;
@@ -806,7 +877,7 @@ gst_ffmpegsubdec_chain (GstPad * pad, GstObject * parent, GstBuffer * inbuf)
       avsubtitle_free(ffmpegdec->frame);
     }
   } while (bsize > 0 && retry--);
-  
+  g_mutex_unlock (&ffmpegdec->flow_lock);
 beach:
 
   gst_buffer_unmap(inbuf, &map);
