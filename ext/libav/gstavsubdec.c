@@ -339,7 +339,7 @@ static void gst_ffmpegsubdec_picture(GstFFMpegSubDec *ffmpegdec, AVSubtitle* sub
   GstVideoCropMeta *vcmeta;
 
   if (sub && sub->num_rects) {
-    //GST_WARNING_OBJECT(ffmpegdec, " sub->num_rects=(%d), width=%d, height=%d", sub->num_rects, ffmpegdec->context->width, ffmpegdec->context->height);
+    //GST_WARNING_OBJECT(ffmpegdec, " sub->num_rects=(%d), width=%d, height=%d, startT=%d, endT=%d", sub->num_rects, ffmpegdec->context->width, ffmpegdec->context->height, sub->start_display_time, sub->end_display_time);
     for (i = 0; i < sub->num_rects; i++) {
       w = sub->rects[i]->w;
       h = sub->rects[i]->h;
@@ -380,13 +380,17 @@ static void gst_ffmpegsubdec_picture(GstFFMpegSubDec *ffmpegdec, AVSubtitle* sub
       vcmeta->width = ffmpegdec->context->width;
       vcmeta->height = ffmpegdec->context->height;
 
-      /*GST_WARNING_OBJECT(ffmpegdec, "Have picture w:%d, h:%d, ts %"
-        GST_TIME_FORMAT ", dur %" G_GINT64_FORMAT, w, h, GST_TIME_ARGS (ts), GST_BUFFER_DURATION (buffer));*/
+      /*GST_WARNING_OBJECT(ffmpegdec, "Have picture (%d,%d) w:%d, h:%d, ts %"
+        GST_TIME_FORMAT ", dur %" G_GINT64_FORMAT "[%ld]", x, y, w, h, GST_TIME_ARGS (ts), GST_BUFFER_DURATION (buffer), ts);*/
 
       gst_pad_push(ffmpegdec->srcpad, buffer);
       g_free(ptr);
+      ffmpegdec->last_sub_time = ts;
     }
   }else {
+     if ((ts - ffmpegdec->last_sub_time) < 1000000000) {
+        return;
+     }
      buffer = gst_buffer_new_allocate (NULL, 1, NULL);
      gst_buffer_add_video_meta (buffer, GST_VIDEO_FRAME_FLAG_NONE,
         GST_VIDEO_FORMAT_RGBA, 0, 0);
@@ -395,7 +399,7 @@ static void gst_ffmpegsubdec_picture(GstFFMpegSubDec *ffmpegdec, AVSubtitle* sub
      gst_pad_push(ffmpegdec->srcpad, buffer);
 
      /*GST_WARNING_OBJECT(ffmpegdec, "Have empty picture ts %"
-        GST_TIME_FORMAT ", dur %" G_GINT64_FORMAT, GST_TIME_ARGS (ts), GST_BUFFER_DURATION (buffer));*/
+        GST_TIME_FORMAT ", dur %" G_GINT64_FORMAT "[%ld]", GST_TIME_ARGS (ts), GST_BUFFER_DURATION (buffer), ts);*/
   }
 }
 
@@ -481,7 +485,7 @@ static void gst_ffmpegsubdec_ass2picture(GstFFMpegSubDec *ffmpegdec, AVSubtitle*
     int stride = 0;
     GstVideoCropMeta *vcmeta;
 
-    //GST_WARNING_OBJECT(ffmpegdec, " sub->num_rects=(%d), width=%d, height=%d", sub->num_rects, ffmpegdec->context->width, ffmpegdec->context->height);
+    //GST_WARNING_OBJECT(ffmpegdec, " sub->num_rects=(%d), width=%d, height=%d, startT=%d, endT=%d", sub->num_rects, ffmpegdec->context->width, ffmpegdec->context->height, sub->start_display_time, sub->end_display_time);
     if (sub && sub->num_rects) {
         for (i = 0; i < sub->num_rects; i++) {
             char *ass_line = sub->rects[i]->ass;

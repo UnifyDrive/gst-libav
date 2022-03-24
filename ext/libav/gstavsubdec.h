@@ -53,6 +53,7 @@ struct _GstFFMpegSubDec
   gint surface_w;
   gint surface_h;
   gboolean need_ass;
+  GstClockTime last_sub_time;
 };
 
 struct _GstFFMpegSubDecClass 
