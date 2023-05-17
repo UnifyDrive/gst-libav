@@ -2325,6 +2325,11 @@ gst_ffmpeg_codecid_to_caps (enum AVCodecID codec_id,
           gst_ff_vid_caps_new (context, NULL, codec_id, encode, "video/x-av1",
           NULL);
       break;
+    case AV_CODEC_ID_HDMV_PGS_SUBTITLE:
+      //caps = gst_caps_new_empty_simple ("subpicture/x-pgs");
+      caps = gst_ff_vid_caps_new (context, NULL, codec_id, encode, "subpicture/x-pgs",
+          NULL);
+      break;
     default:
       GST_DEBUG ("Unknown codec ID %d, please add mapping here", codec_id);
       break;

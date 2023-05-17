@@ -28,6 +28,11 @@
 #include <string.h>
 #include <gst/gst.h>
 
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+#include <libavfilter/avfilter.h>
+#include <libavutil/dict.h>
+
 #include "gstav.h"
 #include "gstavutils.h"
 #include "gstavcfg.h"
@@ -67,6 +72,18 @@ gst_ffmpeg_avcodec_open (AVCodecContext * avctx, AVCodec * codec)
 
   g_mutex_lock (&gst_avcodec_mutex);
   ret = avcodec_open2 (avctx, codec, NULL);
+  g_mutex_unlock (&gst_avcodec_mutex);
+
+  return ret;
+}
+
+int
+gst_ffmpeg_avcodec_open_sub (AVCodecContext *avctx, AVCodec *codec, AVDictionary *codec_opts)
+{
+  int ret;
+
+  g_mutex_lock (&gst_avcodec_mutex);
+  ret = avcodec_open2 (avctx, codec, codec_opts);
   g_mutex_unlock (&gst_avcodec_mutex);
 
   return ret;
@@ -155,13 +172,14 @@ plugin_init (GstPlugin * plugin)
   /* build global ffmpeg param/property info */
   gst_ffmpeg_cfg_init ();
 
-  gst_ffmpegaudenc_register (plugin);
-  gst_ffmpegvidenc_register (plugin);
+  //gst_ffmpegaudenc_register (plugin);
+  //gst_ffmpegvidenc_register (plugin);
   gst_ffmpegauddec_register (plugin);
   gst_ffmpegviddec_register (plugin);
   gst_ffmpegdemux_register (plugin);
   gst_ffmpegmux_register (plugin);
   gst_ffmpegdeinterlace_register (plugin);
+  gst_ffmpegsubdec_register (plugin);
 
   /* Now we can return the pointer to the newly created Plugin object. */
   return TRUE;

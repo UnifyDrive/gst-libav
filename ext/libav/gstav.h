@@ -43,8 +43,12 @@ extern gboolean gst_ffmpegaudenc_register (GstPlugin * plugin);
 extern gboolean gst_ffmpegvidenc_register (GstPlugin * plugin);
 extern gboolean gst_ffmpegmux_register (GstPlugin * plugin);
 extern gboolean gst_ffmpegdeinterlace_register (GstPlugin * plugin);
+extern gboolean gst_ffmpegsubdec_register (GstPlugin * plugin);
+extern gboolean gst_zsassparse_register (GstPlugin * plugin);
+
 
 int gst_ffmpeg_avcodec_open (AVCodecContext *avctx, AVCodec *codec);
+int gst_ffmpeg_avcodec_open_sub (AVCodecContext *avctx, AVCodec *codec, AVDictionary *codec_opts);
 int gst_ffmpeg_avcodec_close (AVCodecContext *avctx);
 int gst_ffmpeg_av_find_stream_info(AVFormatContext *ic);
 
